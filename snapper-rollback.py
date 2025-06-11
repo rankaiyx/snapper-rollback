@@ -125,6 +125,51 @@ def rollback(subvol_main, subvol_main_newname, subvol_rollback_src, dev, dry_run
                 os.rename(subvol_main_newname, subvol_main)
 
 
+def cleanup_files(config, target_root, dry_run=False):
+    """
+    Clean up specified files in the target system if cleanup is enabled.
+    
+    Args:
+        config: Configuration parser object
+        target_root: Path to the root of the target system (rolled-back subvolume)
+        dry_run: Whether to simulate actions without making changes
+    """
+    try:
+        # Check if cleanup is enabled
+        if not config.getboolean("cleanup", "enabled"):
+            return
+    except (configparser.NoSectionError, configparser.NoOptionError):
+        # Skip if cleanup section or option doesn't exist
+        return
+
+    # Get cleanup paths from config
+    paths_str = config.get("cleanup", "paths", fallback="")
+    cleanup_list = [p.strip() for p in paths_str.split(",") if p.strip()]
+    
+    for abs_path in cleanup_list:
+        # Build full path in target system
+        # Remove leading slash to make path relative to target_root
+        rel_path = abs_path.lstrip('/')
+        target_path = target_root / rel_path
+        
+        if dry_run:
+            LOG.info(f"[DRY-RUN] Would check and clean: {target_path}")
+            continue
+            
+        if not target_path.exists():
+            LOG.debug(f"Cleanup: {target_path} does not exist")
+            continue
+            
+        try:
+            if target_path.is_file():
+                target_path.unlink()
+                LOG.info(f"Found and removed file: {target_path} ")
+            else:
+                LOG.warning(f"Cleanup skipped: {target_path} is not a file")
+        except OSError as e:
+            LOG.error(f"Error cleaning {target_path}: {str(e)}")
+
+
 def main():
     args = parse_args()
     config = read_config(args.config)
@@ -138,7 +183,6 @@ def main():
         dev = config.get("root", "dev")
     except configparser.NoOptionError as e:
         dev = None
-
     confirm_typed_value = "CONFIRM"
     try:
         confirmation = input(
@@ -161,6 +205,7 @@ def main():
             dev,
             dry_run=args.dry_run,
         )
+        cleanup_files(config, subvol_main, dry_run=args.dry_run)
     except PermissionError as e:
         LOG.fatal("Permission denied: {}".format(e))
         exit(1)
