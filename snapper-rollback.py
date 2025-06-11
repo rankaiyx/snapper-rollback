@@ -125,6 +125,29 @@ def rollback(subvol_main, subvol_main_newname, subvol_rollback_src, dev, dry_run
                 os.rename(subvol_main_newname, subvol_main)
 
 
+def run_hooks(config, dry_run=False):
+    """Execute post-rollback hook commands if defined in config"""
+    if not config.has_section("hooks"):
+        return
+    
+    if config.has_option("hooks", "post-rollback"):
+        commands = config.get("hooks", "post-rollback").splitlines()
+        LOG.info("Running post-rollback hooks")
+        
+        for cmd in commands:
+            cmd = cmd.strip()
+            if not cmd or cmd.startswith("#"):
+                continue
+                
+            if dry_run:
+                LOG.info(f"[DRY-RUN] Would run: {cmd}")
+            else:
+                LOG.info(f"Running: {cmd}")
+                ret = os.system(cmd)
+                if ret != 0:
+                    LOG.error(f"Hook command failed (exit={ret}): {cmd}")
+
+
 def main():
     args = parse_args()
     config = read_config(args.config)
@@ -161,6 +184,7 @@ def main():
             dev,
             dry_run=args.dry_run,
         )
+        run_hooks(config, dry_run=args.dry_run)
     except PermissionError as e:
         LOG.fatal("Permission denied: {}".format(e))
         exit(1)
